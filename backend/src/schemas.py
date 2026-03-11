@@ -64,7 +64,7 @@ class PostResponse(PostBase):
 
     created_at: datetime
     updated_at: datetime
-    is_published: bool
+    # is_published: bool
 
     model_config = ConfigDict(
         from_attributes=True

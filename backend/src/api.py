@@ -29,7 +29,7 @@ async def get_current_user(
         )
     
     user_uuid = uuid.UUID(user_id_str)
-    user_obj = cruds.get_user_by_id(user_uuid)
+    user_obj = await cruds.get_user_by_id(db, user_uuid)
     
     if not user_obj or user_obj.is_deleted:
         raise HTTPException(
