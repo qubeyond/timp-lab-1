@@ -1,0 +1,31 @@
+.app-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.posts-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.post-card {
+  background: #2a2a2a;
+  padding: 20px;
+  border-radius: 12px;
+  text-align: left;
+  border: 1px solid #444;
+  transition: transform 0.2s;
+}
+
+.post-card:hover {
+  transform: translateY(-2px);
+  border-color: #646cff;
+}
+
+.post-card h3 {
+  margin: 0 0 10px 0;
+  color: #646cff;
+}

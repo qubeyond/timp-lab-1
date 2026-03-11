@@ -38,5 +38,23 @@ services:
       --port 8000 
       --reload
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: lab_frontend_app
+    restart: always
+    ports:
+      - "${FRONTEND_PORT}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=${FRONTEND_PROTOCOL}://${FRONTEND_HOST}:${BACKEND_PORT}/api/v1
+      - BACKEND_PORT=${BACKEND_PORT}
+      - FRONTEND_PORT=${FRONTEND_PORT}
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:
