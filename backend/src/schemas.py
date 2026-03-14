@@ -3,21 +3,21 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 #  User Schemas
+
 
 class UserBase(BaseModel):
     username: str = Field(
-        ..., 
-        min_length=3, 
-        max_length=50
+        ...,
+        min_length=3,
+        max_length=50,
     )
 
 
 class UserCreate(UserBase):
     password: str = Field(
-        ..., 
-        min_length=6
+        ...,
+        min_length=6,
     )
 
 
@@ -28,23 +28,22 @@ class UserResponse(UserBase):
     last_login: datetime | None
     is_deleted: bool
 
-    model_config = ConfigDict(
-        from_attributes=True
-    )
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Post Schemas
 
+
 class PostBase(BaseModel):
     title: str = Field(
-        ..., 
-        min_length=1, 
-        max_length=100
+        ...,
+        min_length=1,
+        max_length=100,
     )
     body: str = Field(
-        ..., 
-        min_length=10, 
-        max_length=500
+        ...,
+        min_length=10,
+        max_length=500,
     )
 
 
@@ -66,12 +65,11 @@ class PostResponse(PostBase):
     updated_at: datetime
     # is_published: bool
 
-    model_config = ConfigDict(
-        from_attributes=True
-    )
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Auth Schemas
+
 
 class Token(BaseModel):
     access_token: str

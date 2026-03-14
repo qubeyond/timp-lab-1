@@ -14,3 +14,26 @@ dependencies = [
     "sqlalchemy>=2.0.48",
     "uvicorn>=0.41.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.6",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "ANN", "B"]
+fixable = ["ALL"]
+ignore = ["ANN401", "B008", "E712"]
+
+[tool.ruff.format]
+quote-style = "double"
+skip-magic-trailing-comma = false
+indent-style = "space"
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]

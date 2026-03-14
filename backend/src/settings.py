@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int
 
     @property
-    def DATABASE_URL(self) -> str:
+    def database_url(self) -> str:
         return (
             f"postgresql+psycopg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int
 
     model_config = SettingsConfigDict(
-        env_file=".env", 
+        env_file=".env",
         extra="ignore",
     )
 
@@ -38,13 +38,15 @@ class Settings(BaseSettings):
     FRONTEND_PROTOCOL: str = "http"
 
     @property
-    def FRONTEND_URL(self) -> str:
+    def frontend_url(self) -> str:
         return f"{self.FRONTEND_PROTOCOL}://{self.FRONTEND_HOST}:{self.FRONTEND_PORT}"
 
     # Other
 
+    DEBUG: bool
+
     model_config = SettingsConfigDict(
-        env_file=".env", 
+        env_file=".env",
         extra="ignore",
     )
 
