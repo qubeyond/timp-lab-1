@@ -34,6 +34,24 @@ async def get_current_user(
     return await AuthService.get_user_from_token(db, token)
 
 
+async def get_optional_user(
+    token: str | None = Depends(
+        OAuth2PasswordBearer(tokenUrl="api/v1/login", auto_error=False),
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Зависимость для необязательной авторизации."""
+
+    if not token:
+        return None
+
+    try:
+        return await AuthService.get_user_from_token(db, token)
+
+    except Exception:
+        return None
+
+
 # Auth Routers
 
 
@@ -156,10 +174,12 @@ async def read_posts(
 async def read_post(
     post_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
 ) -> PostResponse:
-    """Посмотреть пост."""
+    """Посмотреть пост. Автор видит свои черновики."""
 
-    return await PostService.get_post_or_404(db, post_id)
+    viewer_id = getattr(current_user, "id", None)
+    return await PostService.get_post_or_404(db, post_id, viewer_id=viewer_id)
 
 
 @router.get(
@@ -170,11 +190,18 @@ async def read_post(
 async def read_user_posts(
     username: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
 ) -> list[PostResponse]:
-    """Посмотреть все посты пользователя."""
+    """Посмотреть все посты пользователя. Автор видит свои черновики."""
 
-    user = await UserService.get_user_profile(db, username)
-    return await PostService.get_user_posts(db, user.id)
+    target_user = await UserService.get_user_profile(db, username)
+    viewer_id = getattr(current_user, "id", None)
+
+    return await PostService.get_user_posts(
+        db,
+        target_user.id,
+        current_user_id=viewer_id,
+    )
 
 
 @router.post(

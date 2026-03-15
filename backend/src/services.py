@@ -184,17 +184,21 @@ class PostService:
     async def get_post_or_404(
         db: AsyncSession,
         post_id: uuid.UUID,
+        viewer_id: uuid.UUID | None = None,
     ) -> Post:
-        """Получение поста или ошибка 404."""
+        """Получение поста или ошибка 404. Владелец видит свой черновик."""
 
-        post = await PostCRUD.find_post_by_uuid(
-            db,
-            post_id,
-        )
+        post = await PostCRUD.find_post_by_uuid(db, post_id, include_unpublished=True)
 
         if not post:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=404,
+                detail="Post not found",
+            )
+
+        if not post.is_published and post.owner_id != viewer_id:
+            raise HTTPException(
+                status_code=404,
                 detail="Post not found",
             )
 
@@ -204,10 +208,17 @@ class PostService:
     async def get_user_posts(
         db: AsyncSession,
         owner_id: uuid.UUID,
+        current_user_id: uuid.UUID | None = None,
     ) -> list[Post]:
-        """Получение всех постов пользователя."""
+        """Получение всех постов пользователя. Владелец видит свои черновики."""
 
-        return await PostCRUD.get_posts_by_owner_uuid(db, owner_id)
+        is_owner = owner_id == current_user_id
+
+        return await PostCRUD.get_posts_by_owner_uuid(
+            db,
+            owner_id,
+            include_unpublished=is_owner,
+        )
 
     @staticmethod
     async def create_new_post(
@@ -239,7 +250,11 @@ class PostService:
     ) -> Post:
         """Редактирование поста с проверкой прав."""
 
-        post = await PostService.get_post_or_404(db, post_id)
+        post = await PostService.get_post_or_404(
+            db,
+            post_id,
+            viewer_id=user_id,
+        )
 
         if post.owner_id != user_id:
             raise HTTPException(
@@ -261,7 +276,11 @@ class PostService:
     ) -> None:
         """Мягкое удаление поста."""
 
-        post = await PostService.get_post_or_404(db, post_id)
+        post = await PostService.get_post_or_404(
+            db,
+            post_id,
+            viewer_id=user_id,
+        )
 
         if post.owner_id != user_id:
             raise HTTPException(

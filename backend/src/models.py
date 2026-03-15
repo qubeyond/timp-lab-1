@@ -83,6 +83,9 @@ class Post(Base):
     is_published: Mapped[bool] = mapped_column(
         default=True,
     )
+    is_deleted: Mapped[bool] = mapped_column(
+        default=False,
+    )
 
     # Relationships
 

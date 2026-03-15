@@ -26,7 +26,6 @@ class UserResponse(UserBase):
 
     created_at: datetime
     last_login: datetime | None
-    is_deleted: bool
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -57,24 +56,35 @@ class PostBase(BaseModel):
         min_length=10,
         max_length=500,
     )
+    is_published: bool = True
 
 
 class PostCreate(PostBase):
     pass
 
 
-class PostUpdate(PostBase):
-    title: str | None = None
-    body: str | None = None
+class PostUpdate(BaseModel):
+    title: str | None = Field(
+        None,
+        min_length=1,
+        max_length=100,
+    )
+    body: str | None = Field(
+        None,
+        min_length=10,
+        max_length=500,
+    )
     is_published: bool | None = None
 
 
 class PostResponse(PostBase):
     id: uuid.UUID
-    owner_id: uuid.UUID | None
+    owner_id: uuid.UUID
+
+    owner: UserResponse
 
     created_at: datetime
     updated_at: datetime
-    # is_published: bool
+    is_published: bool
 
     model_config = ConfigDict(from_attributes=True)

@@ -180,3 +180,111 @@ async def test_post_permissions(client: AsyncClient, test_user_token: str) -> No
 
     res_403 = await client.delete(f"/api/v1/posts/{post_id}", headers=headers_2)
     assert res_403.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_draft_visibility_flow(client: AsyncClient, test_user_token: str) -> None:
+    headers_owner = {"Authorization": f"Bearer {test_user_token}"}
+
+    # Создание черновика
+    post_data = {
+        "title": "Draft Post",
+        "body": "This is a private draft content",
+        "is_published": False,
+    }
+    res = await client.post("/api/v1/posts", json=post_data, headers=headers_owner)
+    post_id = res.json()["id"]
+
+    # Успех: Автор видит свой черновик
+    res_owner = await client.get(f"/api/v1/posts/{post_id}", headers=headers_owner)
+    assert res_owner.status_code == 200
+
+    # Ошибка: Аноним не видит черновик (404)
+    res_anon = await client.get(f"/api/v1/posts/{post_id}")
+    assert res_anon.status_code == 404
+
+    # Ошибка: Другой юзер не видит черновик (404)
+    other_user = {"username": "other", "password": "password123"}
+    reg_other = await client.post("/api/v1/register", json=other_user)
+    headers_other = {"Authorization": f"Bearer {reg_other.json()['access_token']}"}
+
+    res_other = await client.get(f"/api/v1/posts/{post_id}", headers=headers_other)
+    assert res_other.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_public_posts_listing(client: AsyncClient, test_user_token: str) -> None:
+    headers = {"Authorization": f"Bearer {test_user_token}"}
+
+    # Создаем публичного и скрытого постов
+    await client.post(
+        "/api/v1/posts",
+        headers=headers,
+        json={"title": "Public", "body": "Public content", "is_published": True},
+    )
+    await client.post(
+        "/api/v1/posts",
+        headers=headers,
+        json={"title": "Private", "body": "Private content", "is_published": False},
+    )
+
+    # Проверка общего списка
+    res_all = await client.get("/api/v1/posts")
+    posts = res_all.json()
+    assert len(posts) == 1
+    assert posts[0]["is_published"] is True
+
+
+@pytest.mark.asyncio
+async def test_user_posts_visibility(client: AsyncClient, test_user_token: str) -> None:
+    headers_owner = {"Authorization": f"Bearer {test_user_token}"}
+
+    me = await client.get("/api/v1/users", headers=headers_owner)
+    username = me.json()[0]["username"]
+
+    await client.post(
+        "/api/v1/posts",
+        headers=headers_owner,
+        json={"title": "Draft", "body": "Draft content", "is_published": False},
+    )
+
+    # Успех: Автор видит свой черновик в списке своих постов
+    res_my_list = await client.get(
+        f"/api/v1/users/{username}/posts",
+        headers=headers_owner,
+    )
+    assert len(res_my_list.json()) == 1
+
+    # Ошибка: Аноним видит пустой список постов этого юзера
+    res_anon_list = await client.get(f"/api/v1/users/{username}/posts")
+    assert len(res_anon_list.json()) == 0
+
+
+@pytest.mark.asyncio
+async def test_partial_update_does_not_reset_status(
+    client: AsyncClient,
+    test_user_token: str,
+) -> None:
+    headers = {"Authorization": f"Bearer {test_user_token}"}
+
+    # Создание поста
+    res = await client.post(
+        "/api/v1/posts",
+        headers=headers,
+        json={
+            "title": "Old Title",
+            "body": "Original content...",
+            "is_published": True,
+        },
+    )
+    post_id = res.json()["id"]
+
+    # Обновление ТОЛЬКО заголовка
+    await client.patch(
+        f"/api/v1/posts/{post_id}", headers=headers, json={"title": "New Title"}
+    )
+
+    # Проверка, что пост ВСЁ ЕЩЕ опубликован
+    res_final = await client.get(f"/api/v1/posts/{post_id}")
+    assert res_final.json()["title"] == "New Title"
+    assert res_final.json()["is_published"] is True

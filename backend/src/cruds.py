@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from src.models import Post, User
 from src.schemas import PostCreate, PostUpdate
@@ -14,13 +15,10 @@ class UserCRUD:
     @staticmethod
     async def get_all_users(
         db: AsyncSession,
-        include_deleted: bool = False,
     ) -> list[User]:
-        """Получение списка пользователей с фильтром удаления."""
+        """Получение списка пользователей."""
 
-        query = select(User)
-        if not include_deleted:
-            query = query.where(User.is_deleted == False)
+        query = select(User).where(User.is_deleted == False)
 
         result = await db.execute(query)
         return list(result.scalars().all())
@@ -29,12 +27,12 @@ class UserCRUD:
     async def find_user_by_uuid(
         db: AsyncSession,
         user_id: uuid.UUID,
-        include_deleted: bool = False,
     ) -> User | None:
-        """Получение пользователя по UUID с фильтром удаления."""
+        """Получение пользователя по UUID."""
 
         user = await db.get(User, user_id)
-        if user and not include_deleted and user.is_deleted:
+
+        if user and user.is_deleted:
             return None
 
         return user
@@ -43,13 +41,13 @@ class UserCRUD:
     async def find_user_by_username(
         db: AsyncSession,
         username: str,
-        include_deleted: bool = False,
     ) -> User | None:
-        """Получение пользователя по имени с фильтром удаления."""
+        """Получение пользователя по имени."""
 
-        query = select(User).where(User.username == username)
-        if not include_deleted:
-            query = query.where(User.is_deleted == False)
+        query = select(User).where(
+            User.username == username,
+            User.is_deleted == False,
+        )
 
         result = await db.execute(query)
         return result.scalar_one_or_none()
@@ -120,7 +118,14 @@ class PostCRUD:
     ) -> list[Post]:
         """Получение списка постов с фильтром публикации."""
 
-        query = select(Post)
+        query = (
+            select(Post)
+            .options(joinedload(Post.owner))
+            .where(
+                Post.is_deleted == False,
+            )
+        )
+
         if not include_unpublished:
             query = query.where(Post.is_published == True)
 
@@ -135,8 +140,20 @@ class PostCRUD:
     ) -> Post | None:
         """Получение поста по UUID с фильтром публикации."""
 
-        post = await db.get(Post, post_id)
-        if post and not include_unpublished and not post.is_published:
+        query = (
+            select(Post)
+            .options(joinedload(Post.owner))
+            .where(
+                Post.id == post_id,
+            )
+        )
+        result = await db.execute(query)
+        post = result.scalar_one_or_none()
+
+        if not post or post.is_deleted:
+            return None
+
+        if not include_unpublished and not post.is_published:
             return None
 
         return post
@@ -149,7 +166,15 @@ class PostCRUD:
     ) -> list[Post]:
         """Получение постов владельца с фильтром публикации."""
 
-        query = select(Post).where(Post.owner_id == owner_id)
+        query = (
+            select(Post)
+            .options(joinedload(Post.owner))
+            .where(
+                Post.owner_id == owner_id,
+                Post.is_deleted == False,
+            )
+        )
+
         if not include_unpublished:
             query = query.where(Post.is_published == True)
 
@@ -183,6 +208,7 @@ class PostCRUD:
         """Обновление поста. Принимает объект."""
 
         update_data = post_in.model_dump(exclude_unset=True)
+
         for key, value in update_data.items():
             setattr(post, key, value)
 
@@ -198,5 +224,5 @@ class PostCRUD:
     ) -> None:
         """Удаление поста (мягкое удаление). Принимает объект."""
 
-        post.is_published = False
+        post.is_deleted = True
         await db.flush()
