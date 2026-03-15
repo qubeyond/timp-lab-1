@@ -31,6 +31,18 @@ class UserResponse(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+# Auth Schemas
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "Bearer"
+
+
+class AuthResponse(Token):
+    user: UserResponse
+
+
 # Post Schemas
 
 
@@ -66,11 +78,3 @@ class PostResponse(PostBase):
     # is_published: bool
 
     model_config = ConfigDict(from_attributes=True)
-
-
-# Auth Schemas
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str = "bearer"

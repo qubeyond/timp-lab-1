@@ -2,157 +2,161 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import Post, User
-from src.schemas import PostCreate, PostUpdate, UserCreate
-from src.security import SecurityService
+from src.schemas import PostCreate, PostUpdate
 
 
 class UserCRUD:
-    @staticmethod
-    async def register_user(
-        db: AsyncSession,
-        user_in: UserCreate,
-    ) -> User | None:
-        try:
-            return await UserCRUD.create_user(db, user_in)
-        except IntegrityError:
-            await db.rollback()
-            return None
-
-    @staticmethod
-    async def authenticate_user(
-        db: AsyncSession,
-        username: str,
-        password: str,
-    ) -> User | None:
-        query = select(User).where(
-            User.username == username,
-            User.is_deleted == False,
-        )
-        result = await db.execute(query)
-        user = result.scalar_one_or_none()
-
-        if not user or not SecurityService.verify_password(
-            password, user.hashed_password
-        ):
-            return None
-
-        user.last_login = datetime.now(UTC)
-        await db.commit()
-        await db.refresh(user)
-        return user
+    # GET
 
     @staticmethod
     async def get_all_users(
         db: AsyncSession,
+        include_deleted: bool = False,
     ) -> list[User]:
-        query = select(User).where(
-            User.is_deleted == False,
-        )
+        """Получение списка пользователей с фильтром удаления."""
+
+        query = select(User)
+        if not include_deleted:
+            query = query.where(User.is_deleted == False)
+
         result = await db.execute(query)
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_user_by_id(
+    async def find_user_by_uuid(
         db: AsyncSession,
         user_id: uuid.UUID,
+        include_deleted: bool = False,
     ) -> User | None:
-        return await db.get(User, user_id)
+        """Получение пользователя по UUID с фильтром удаления."""
+
+        user = await db.get(User, user_id)
+        if user and not include_deleted and user.is_deleted:
+            return None
+
+        return user
+
+    @staticmethod
+    async def find_user_by_username(
+        db: AsyncSession,
+        username: str,
+        include_deleted: bool = False,
+    ) -> User | None:
+        """Получение пользователя по имени с фильтром удаления."""
+
+        query = select(User).where(User.username == username)
+        if not include_deleted:
+            query = query.where(User.is_deleted == False)
+
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+
+    # CREATE
 
     @staticmethod
     async def create_user(
         db: AsyncSession,
-        user_in: UserCreate,
+        username: str,
+        hashed_password: str,
     ) -> User:
-        new_user = User(
-            username=user_in.username,
-            hashed_password=SecurityService.hash_password(user_in.password),
-        )
+        """Создание нового пользователя."""
+
+        new_user = User(username=username, hashed_password=hashed_password)
         db.add(new_user)
-        try:
-            await db.commit()
-            await db.refresh(new_user)
-            return new_user
-        except IntegrityError:
-            await db.rollback()
-            raise
+
+        await db.flush()
+        return new_user
+
+    # UPDATE
 
     @staticmethod
-    async def update_username(
+    async def update_user_obj(
         db: AsyncSession,
-        user_id: uuid.UUID,
+        user: User,
         new_username: str,
-    ) -> User | None:
-        user = await db.get(User, user_id)
-        if user:
-            user.username = new_username
-            try:
-                await db.commit()
-                await db.refresh(user)
-                return user
-            except IntegrityError:
-                await db.rollback()
-                return None
-        return None
+    ) -> User:
+        """Обновление пользователя. Принимает объект."""
+
+        user.username = new_username
+
+        await db.flush()
+        return user
 
     @staticmethod
-    async def soft_delete_user(
+    async def update_last_login(
         db: AsyncSession,
-        user_id: uuid.UUID,
-    ) -> User | None:
-        user = await db.get(User, user_id)
-        if user:
-            user.is_deleted = True
-            await db.commit()
-            await db.refresh(user)
-            return user
-        return None
+        user: User,
+    ) -> User:
+        """Обновление времени последнего входа пользователя."""
+
+        user.last_login = datetime.now(UTC)
+
+        await db.flush()
+        return user
+
+    # DELETE
+
+    @staticmethod
+    async def soft_delete_user_obj(
+        db: AsyncSession,
+        user: User,
+    ) -> None:
+        """Удаление пользователя (мягкое удаление). Принимает объект."""
+
+        user.is_deleted = True
+        await db.flush()
 
 
 class PostCRUD:
+    # GET
+
     @staticmethod
     async def get_all_posts(
         db: AsyncSession,
+        include_unpublished: bool = False,
     ) -> list[Post]:
-        query = select(Post).where(
-            Post.is_published == True,
-        )
-        result = await db.execute(
-            query.order_by(Post.created_at.desc()),
-        )
+        """Получение списка постов с фильтром публикации."""
+
+        query = select(Post)
+        if not include_unpublished:
+            query = query.where(Post.is_published == True)
+
+        result = await db.execute(query.order_by(Post.created_at.desc()))
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_post_by_uuid(
+    async def find_post_by_uuid(
         db: AsyncSession,
         post_id: uuid.UUID,
+        include_unpublished: bool = False,
     ) -> Post | None:
-        return await db.get(Post, post_id)
+        """Получение поста по UUID с фильтром публикации."""
+
+        post = await db.get(Post, post_id)
+        if post and not include_unpublished and not post.is_published:
+            return None
+
+        return post
 
     @staticmethod
-    async def get_posts_by_username(
+    async def get_posts_by_owner_uuid(
         db: AsyncSession,
-        username: str,
+        owner_id: uuid.UUID,
+        include_unpublished: bool = False,
     ) -> list[Post]:
-        user_query = select(User).where(
-            User.username == username,
-        )
-        user_res = await db.execute(user_query)
-        user = user_res.scalar_one_or_none()
+        """Получение постов владельца с фильтром публикации."""
 
-        if not user:
-            return []
+        query = select(Post).where(Post.owner_id == owner_id)
+        if not include_unpublished:
+            query = query.where(Post.is_published == True)
 
-        posts_query = select(Post).where(
-            Post.owner_id == user.id,
-        )
-        result = await db.execute(
-            posts_query.order_by(Post.created_at.desc()),
-        )
+        result = await db.execute(query.order_by(Post.created_at.desc()))
         return list(result.scalars().all())
+
+    # CREATE
 
     @staticmethod
     async def create_post(
@@ -160,54 +164,39 @@ class PostCRUD:
         post_in: PostCreate,
         owner_id: uuid.UUID,
     ) -> Post:
-        new_post = Post(
-            **post_in.model_dump(),
-            owner_id=owner_id,
-        )
+        """Создание нового поста."""
+
+        new_post = Post(**post_in.model_dump(), owner_id=owner_id)
+
         db.add(new_post)
-        await db.commit()
-        await db.refresh(new_post)
+        await db.flush()
         return new_post
 
+    # UPDATE
+
     @staticmethod
-    async def update_post(
+    async def update_post_obj(
         db: AsyncSession,
-        post_id: uuid.UUID,
+        post: Post,
         post_in: PostUpdate,
-        user_id: uuid.UUID,
-    ) -> Post | None:
-        query = select(Post).where(
-            Post.id == post_id,
-            Post.owner_id == user_id,
-        )
-        result = await db.execute(query)
-        post = result.scalar_one_or_none()
+    ) -> Post:
+        """Обновление поста. Принимает объект."""
 
-        if not post:
-            return None
-
-        for key, value in post_in.model_dump(exclude_unset=True).items():
+        update_data = post_in.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
             setattr(post, key, value)
 
-        await db.commit()
-        await db.refresh(post)
+        await db.flush()
         return post
 
-    @staticmethod
-    async def soft_delete_post(
-        db: AsyncSession,
-        post_id: uuid.UUID,
-        user_id: uuid.UUID,
-    ) -> bool:
-        query = select(Post).where(
-            Post.id == post_id,
-            Post.owner_id == user_id,
-        )
-        result = await db.execute(query)
-        post = result.scalar_one_or_none()
+    # DELETE
 
-        if post:
-            post.is_published = False
-            await db.commit()
-            return True
-        return False
+    @staticmethod
+    async def soft_delete_post_obj(
+        db: AsyncSession,
+        post: Post,
+    ) -> None:
+        """Удаление поста (мягкое удаление). Принимает объект."""
+
+        post.is_published = False
+        await db.flush()

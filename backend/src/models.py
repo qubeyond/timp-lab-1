@@ -58,7 +58,7 @@ class Post(Base):
     )
     owner_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id"),
-        nullable=True,
+        nullable=False,
     )
 
     # Content

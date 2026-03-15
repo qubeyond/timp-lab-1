@@ -1,12 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.cruds import PostCRUD, UserCRUD
 from src.database import get_db
+from src.models import User
 from src.schemas import (
+    AuthResponse,
     PostCreate,
     PostResponse,
     PostUpdate,
@@ -15,6 +16,7 @@ from src.schemas import (
     UserResponse,
 )
 from src.security import SecurityService
+from src.services import AuthService, PostService, UserService
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/login")
@@ -26,23 +28,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/login")
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
-) -> UserResponse:
-    user_id_str = SecurityService.decode_access_token(token)
-    if not user_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-        )
+) -> User:
+    """Получение текущего пользователя по токену."""
 
-    user_uuid = uuid.UUID(user_id_str)
-    user_obj = await UserCRUD.get_user_by_id(db, user_uuid)
-
-    if not user_obj or user_obj.is_deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-    return UserResponse.model_validate(user_obj)
+    return await AuthService.get_user_from_token(db, token)
 
 
 # Auth Routers
@@ -50,21 +39,17 @@ async def get_current_user(
 
 @router.post(
     "/register",
-    response_model=UserResponse,
+    response_model=AuthResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["Auth"],
 )
 async def register(
     user_in: UserCreate,
     db: AsyncSession = Depends(get_db),
-) -> UserResponse:
-    user = await UserCRUD.register_user(db, user_in)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already taken",
-        )
-    return UserResponse.model_validate(user)
+) -> dict:
+    """Регистрация аккаунта."""
+
+    return await AuthService.register_and_login(db, user_in)
 
 
 @router.post(
@@ -76,14 +61,16 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> Token:
-    user = await UserCRUD.authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-        )
+    """Вход в аккаунт по логину и паролю."""
+
+    user = await AuthService.authenticate_user(
+        db,
+        form_data.username,
+        form_data.password,
+    )
     token = SecurityService.create_access_token(data={"sub": str(user.id)})
-    return Token(access_token=token, token_type="bearer")
+
+    return Token(access_token=token, token_type="Bearer")
 
 
 @router.post(
@@ -92,13 +79,11 @@ async def login(
     tags=["Auth"],
 )
 async def logout(
-    current_user: UserResponse = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> None:
-    """
-    В текущей реализации JWT logout происходит на стороне клиента
-    путем удаления токена. Этот эндпоинт зарезервирован для
-    будущей реализации черного списка токенов.
-    """
+    """Выход из аккаунта."""
+
+    await AuthService.logout_user(current_user)
     return None
 
 
@@ -113,8 +98,23 @@ async def logout(
 async def read_users(
     db: AsyncSession = Depends(get_db),
 ) -> list[UserResponse]:
-    users = await UserCRUD.get_all_users(db)
-    return [UserResponse.model_validate(u) for u in users]
+    """Посмотреть всех пользователей."""
+
+    return await UserService.get_active_users(db)
+
+
+@router.get(
+    "/users/profile/{username}",
+    response_model=UserResponse,
+    tags=["Users"],
+)
+async def get_profile(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Посмотреть профиль пользователя."""
+
+    return await UserService.get_user_profile(db, username)
 
 
 @router.patch(
@@ -124,29 +124,12 @@ async def read_users(
 )
 async def change_my_username(
     new_username: str,
-    current_user: UserResponse = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    updated_user = await UserCRUD.update_username(db, current_user.id, new_username)
-    if not updated_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already taken",
-        )
-    return UserResponse.model_validate(updated_user)
+    """Обновить свой профиль."""
 
-
-@router.delete(
-    "/users/me",
-    status_code=status.HTTP_204_NO_CONTENT,
-    tags=["Users"],
-)
-async def delete_my_account(
-    current_user: UserResponse = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    await UserCRUD.soft_delete_user(db, current_user.id)
-    return None
+    return await UserService.update_my_username(db, current_user, new_username)
 
 
 # Posts Routers
@@ -160,8 +143,9 @@ async def delete_my_account(
 async def read_posts(
     db: AsyncSession = Depends(get_db),
 ) -> list[PostResponse]:
-    posts = await PostCRUD.get_all_posts(db)
-    return [PostResponse.model_validate(p) for p in posts]
+    """Посмотреть все посты."""
+
+    return await PostService.get_public_posts(db)
 
 
 @router.get(
@@ -173,13 +157,9 @@ async def read_post(
     post_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ) -> PostResponse:
-    post = await PostCRUD.get_post_by_uuid(db, post_id)
-    if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Post not found",
-        )
-    return PostResponse.model_validate(post)
+    """Посмотреть пост."""
+
+    return await PostService.get_post_or_404(db, post_id)
 
 
 @router.get(
@@ -191,8 +171,10 @@ async def read_user_posts(
     username: str,
     db: AsyncSession = Depends(get_db),
 ) -> list[PostResponse]:
-    user_posts = await PostCRUD.get_posts_by_username(db, username)
-    return [PostResponse.model_validate(p) for p in user_posts]
+    """Посмотреть все посты пользователя."""
+
+    user = await UserService.get_user_profile(db, username)
+    return await PostService.get_user_posts(db, user.id)
 
 
 @router.post(
@@ -203,11 +185,12 @@ async def read_user_posts(
 )
 async def create_post(
     post_in: PostCreate,
-    current_user: UserResponse = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PostResponse:
-    post = await PostCRUD.create_post(db, post_in, current_user.id)
-    return PostResponse.model_validate(post)
+    """Создать пост."""
+
+    return await PostService.create_new_post(db, post_in, current_user.id)
 
 
 @router.patch(
@@ -218,16 +201,12 @@ async def create_post(
 async def update_post(
     post_id: uuid.UUID,
     post_in: PostUpdate,
-    current_user: UserResponse = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PostResponse:
-    updated_post = await PostCRUD.update_post(db, post_id, post_in, current_user.id)
-    if not updated_post:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized or post not found",
-        )
-    return PostResponse.model_validate(updated_post)
+    """Обновить пост."""
+
+    return await PostService.update_post(db, post_id, post_in, current_user.id)
 
 
 @router.delete(
@@ -237,13 +216,10 @@ async def update_post(
 )
 async def delete_post(
     post_id: uuid.UUID,
-    current_user: UserResponse = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    success = await PostCRUD.soft_delete_post(db, post_id, current_user.id)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized or post not found",
-        )
+    """Удалить пост."""
+
+    await PostService.delete_post(db, post_id, current_user.id)
     return None
